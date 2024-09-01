@@ -4,6 +4,7 @@ from newsapi import NewsApiClient
 from .models import Article
 from django.utils.dateparse import parse_datetime
 from django.views.decorators.csrf import csrf_exempt
+from django.db.models import Q  # <-- NEW: Import Q for complex queries
 
 # Initialize the News API client
 newsapi = NewsApiClient(api_key='cad07dc33d534c508a93ae9128e9d716')
@@ -17,7 +18,7 @@ def get_sources_and_domains():
         id = e['id']
         domain = e['url'].replace("http://", "").replace("https://", "").replace("www.", "")
         slash = domain.find('/')
-        if slash != -1:
+        if (slash != -1):
             domain = domain[:slash]
         sources.append(id)
         domains.append(domain)
@@ -26,7 +27,6 @@ def get_sources_and_domains():
 # Django view for fetching and storing news articles
 @csrf_exempt
 def fetch_and_store_articles(request):
-    print(request)
     if request.method == "POST":
         keyword = request.POST.get("keyword", "")
         sources, domains = get_sources_and_domains()
@@ -49,11 +49,9 @@ def fetch_and_store_articles(request):
                 title=article['title'],
                 url=article['url'],
                 defaults={
-                    'description': article['description'],
+                    'description': article.get('description', ''),
                     'published_at': parse_datetime(article['publishedAt']),
                     'source_name': article['source']['name'],
-                    'pictureUrl': article['urlToImage'],  # Assuming 'urlToImage' is the correct key
-                    'topic': keyword,
                 }
             )
             if created:
@@ -67,6 +65,24 @@ def fetch_and_store_articles(request):
     else:
         return JsonResponse({"error": "POST request required."}, status=400)
 
+# Django view to search stored news articles by topic  # <-- NEW: Function for searching articles
+def search_articles(request):  
+    keyword = request.GET.get("keyword", "")  # <-- NEW: Retrieve search keyword
+
+    if not keyword:  # <-- NEW: Check if keyword is provided
+        return JsonResponse({"error": "Please provide a search keyword."}, status=400)
+    # NEW: Query the database for articles containing the keyword in the title or description
+    articles = Article.objects.filter(
+        Q(title__icontains=keyword) |
+        Q(description__icontains=keyword)
+    )
+    if not articles.exists():  # <-- NEW: Check if any articles were found
+        return JsonResponse({"message": "No articles found for the given keyword."}, status=404)
+
+    # NEW: Return the matching articles as JSON
+    return JsonResponse({
+        "articles": list(articles.values())
+    }, safe=False)
 # Endpoint testing
 def test_endpoint(request):
     return JsonResponse({"message": "Endpoint Reached."}, status=200)
